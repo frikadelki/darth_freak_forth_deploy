@@ -1,42 +1,79 @@
 : FF_MAIN ( -- )
-  |<
+  BEGIN
+    |< SUMER_RUN_GAME |<
+    s" Try again? " ?ASK_YES_NO
+  UNTIL
+;
+
+: SUMER_RUN_GAME ( -- )
   EMPIRE_START |<
-  SUMER_YEARS_N SUMER_RULE_YEARS |<
-  SUMER_RULE_END |<
-  EMPIRE_END |<
-  |<
+  SUMER_YEARS_N SUMER_RULE_YEARS
+  SUMER_RULE_END
+  |< EMPIRE_END
 ;
 
 : SUMER_RULE_YEARS ( Empire $empire Num $years -- Empire $empire )
   VAR $years
   0 VAR $year
   BEGIN $year 1 + VAR $year
-    $year SUMER_RULE_SINGLE_YEAR
+    $year SUMER_RULE_SINGLE_YEAR VAR $success
+    $success NOT IF
+      RETURN
+    THEN
   $year $years < UNTIL
 ;
 
-: SUMER_RULE_SINGLE_YEAR ( Empire $empire Num $year -- Empire $empire )
+: SUMER_RULE_SINGLE_YEAR ( Empire $empire Num $year -- Empire $empire Bool $success )
   VAR $year
-  s" ! A new year dawns on our empire. " .
-  CLASS_EMPIRE_TO_STRING |<
 
-  SUMER_LAND_TRADE |<
-  SUMER_FEED_DECIDE VAR $fedGrain |<
-  SUMER_LAND_SOW_DECIDE VAR $sowedLand |<
+  s" ! " .
+  s" A new year dawns on your empire. " .
+  CLASS_EMPIRE_TO_STRING
 
-  SUMER_DEFAULT_DOTS_WAIT |<
+  s" ? " .
+  SUMER_LAND_TRADE
+  s" ? " .
+  SUMER_FEED_DECIDE VAR $fedGrain
+  s" ? " .
+  SUMER_LAND_SOW_DECIDE VAR $sowedLand
 
-  $fedGrain SUMER_FEED_APPLY
+  SUMER_DEFAULT_DOTS_WAIT
+
+  $fedGrain SUMER_FEED_APPLY VAR $impeached
+  $impeached IF
+    SUMER_IMPEACHMENT_MESSAGE
+    false RETURN
+  THEN
+
   $sowedLand SUMER_LAND_SOW_APPLY
-  CLASS_EMPIRE_YEAR_END
-  |<
 
-  SUMER_DEFAULT_DOTS_WAIT |<
+  SUMER_EVENT_RATS
+  SUMER_EVENT_PLAGUE
+  SUMER_EVENT_NOMADS
+
+  SUMER_EVENT_?REVOLT IF
+    SUMER_REVOLT_MESSAGE
+    false RETURN
+  THEN
+
+  CLASS_EMPIRE_?ALIVE NOT IF
+    SUMER_EMPIRE_IN_SHAMBLES_MESSAGE
+    false RETURN
+  THEN
+
+  SUMER_DEFAULT_DOTS_WAIT
+
+  CLASS_EMPIRE_YEAR_END
+  true
 ;
 
 : SUMER_RULE_END ( Empire $empire -- Empire $empire )
-  s" ! Sumer rule ends. " .
-  CLASS_EMPIRE_TO_STRING |<
+  s" ! " .
+  s" Sumer rule ends. " .
+  CLASS_EMPIRE_TO_STRING
+  SUMER_DEFAULT_DOTS_WAIT
+  s" ! " .
+  SUMER_EMPIRE_STORY_STATUS
 ;
 
 : SUMER_LAND_TRADE ( Empire $empire -- Empire $empire )
@@ -75,19 +112,24 @@
   BEGIN
     s" How many acres of land do you want to sow with grain? "
     SUMER_SOLICIT_NUMBER VAR $land
-    $land CLASS_EMPIRE_LAND_HAS VAR $hasEnoughLand
-    $land 1 * VAR $grainCost
-    $grainCost CLASS_EMPIRE_GRAIN_HAS VAR $hasEnoughGrain
-    $hasEnoughLand NOT IF
+    $land CLASS_EMPIRE_LAND_HAS NOT IF
       s" You do not have that much land to sow. " .
       true
-    ELSE $hasEnoughGrain NOT IF
-      s" You do not have enough grain to sow that much land. " .
-      true
     ELSE
-      $grainCost CLASS_EMPIRE_GRAIN_SUB
-      false
-    THEN THEN
+      $land SUMER_SOW_ACRES_PER_PERSON / CLASS_EMPIRE_POPULATION_HAS NOT IF
+        s" You do not have enough people to sow that much land. " .
+        true
+      ELSE
+        $land SUMER_SOW_BUSHELS_PER_ACRE * VAR $grainCost
+        $grainCost CLASS_EMPIRE_GRAIN_HAS NOT IF
+          s" You do not have enough grain to sow that much land. " .
+          true
+        ELSE
+          $grainCost CLASS_EMPIRE_GRAIN_SUB
+          false
+        THEN
+      THEN
+    THEN
   UNTIL
   $land
 ;
@@ -97,7 +139,7 @@
   SUMER_LAND_FERTILITY VAR $fertility
   $land $fertility * VAR $harvest
   $harvest CLASS_EMPIRE_GRAIN_ADD
-  s" You harvested " .. s"_ .. $fertility .. s"_ .. s" bushels of grain per acre. " .
+  s" Harvested " .. s"_ .. $fertility .. s"_ .. s" bushels of grain per acre. " .
 ;
 
 : SUMER_FEED_DECIDE ( Empire $empire -- Empire $empire Num $grain )
@@ -115,13 +157,47 @@
   $grain
 ;
 
-: SUMER_FEED_APPLY ( Empire $empire Num $grain -- Empire $empire )
+: SUMER_FEED_APPLY ( Empire $empire Num $grain -- Empire $empire Bool $impeached )
   SUMER_PERSON_RATION ~/ VAR $fedPeople
-  CLASS_EMPIRE_POPULATION_GET $fedPeople - VAR $starvedPeople
+  CLASS_EMPIRE_POPULATION_GET VAR $originalPopulation
+  $originalPopulation $fedPeople - VAR $starvedPeople
   $starvedPeople 0 > IF
     $starvedPeople CLASS_EMPIRE_POPULATION_SUB
     $starvedPeople .. s"_ .. s" people starved to death. " .
   THEN
+  $originalPopulation $starvedPeople SUMER_PEOPLE_STARVED_?IMPEACHED
+;
+
+: SUMER_EVENT_RATS ( Empire $empire -- Empire $empire )
+  CLASS_EMPIRE_GRAIN_GET VAR $grain
+  $grain 0 <= IF RETURN THEN
+  100 RANDOM_INT 75 < NOT IF RETURN THEN
+  $grain 25 RANDOM_INT * 100 ~/ 1 + VAR $grainLoss
+  $grainLoss CLASS_EMPIRE_GRAIN_SUB
+  s" Rats ate " .. s"_ .. $grainLoss .. s"_ .. s" bushels of grain. " .
+;
+
+: SUMER_EVENT_PLAGUE ( Empire $empire -- Empire $empire )
+  CLASS_EMPIRE_POPULATION_GET VAR $population
+  $population 0 <= IF RETURN THEN
+  100 RANDOM_INT 15 < NOT IF RETURN THEN
+  $population 2 ~/ RANDOM_INT 1 + VAR $plaguePeople
+  $plaguePeople CLASS_EMPIRE_POPULATION_SUB
+  s" Horrible plague struck and killed " .. s"_ .. $plaguePeople .. s"_ .. s" people. " .
+;
+
+: SUMER_EVENT_NOMADS ( Empire $empire -- Empire $empire )
+  CLASS_EMPIRE_POPULATION_GET 15 RANDOM_INT * 100 ~/ 1 + VAR $nomads
+  $nomads CLASS_EMPIRE_POPULATION_ADD
+  $nomads .. s"_ .. s" nomads joined your empire. " .
+;
+
+: SUMER_EVENT_?REVOLT ( Empire $empire -- Empire $empire Bool $revolt )
+  CLASS_EMPIRE_LAND_GET VAR $land
+  $land 0 <= IF true RETURN THEN
+  CLASS_EMPIRE_POPULATION_GET VAR $population
+  $population 0 <= IF true RETURN THEN
+  $land $population / 1 <
 ;
 
 : SUMER_SOLICIT_NUMBER ( String $prompt -- Num $number )
@@ -133,6 +209,49 @@
       s" Think again. " .
     THEN
   $success NOT UNTIL
+;
+
+: SUMER_IMPEACHMENT_MESSAGE ( -- )
+  s" Due to extreme mismanagement you have not only been impeached and " .. s"_ ..
+  s" thrown out of office, but you have also been declared national fink!!!! " .
+;
+
+: SUMER_REVOLT_MESSAGE ( -- )
+  s" People have risen up against you! " .
+;
+
+: SUMER_EMPIRE_IN_SHAMBLES_MESSAGE ( -- )
+  s" Empire is in shambles! " .
+;
+
+: SUMER_EMPIRE_STORY_STATUS ( Empire $empire -- Empire $empire )
+  CLASS_EMPIRE_POPULATION_GET VAR $population
+  CLASS_EMPIRE_LAND_GET VAR $land
+  CLASS_EMPIRE_GRAIN_GET VAR $grain
+
+  $land $population / VAR $density
+  $density 8 <= IF
+    s" CRAMPED " ..
+  ELSE $density 11 <= IF
+    s" MEDIOCRE " ..
+  ELSE
+    s" VAST " ..
+  THEN THEN
+
+  s"_ ..
+
+  $grain $population / VAR $grainPerPerson
+  $grainPerPerson SUMER_PERSON_RATION < IF
+    s" STARVING " ..
+  ELSE $grainPerPerson SUMER_PERSON_RATION 1.5 * < IF
+    s" SATISFIED " ..
+  ELSE
+    s" LUSH " ..
+  THEN THEN
+
+  s"_ ..
+
+  s" EMPIRE " .
 ;
 
 : SUMER_DEFAULT_DOTS_WAIT ( -- ) 3 SUMER_X_DOTS_WAIT |< ;
@@ -163,9 +282,19 @@
 
 : SUMER_LAND_FERTILITY_MIN ( -- Num $fertility ) 1 ;
 
-: SUMER_LAND_FERTILITY_MAX ( -- Num $fertility ) 3 ;
+: SUMER_LAND_FERTILITY_MAX ( -- Num $fertility ) 4 ;
+
+: SUMER_SOW_BUSHELS_PER_ACRE ( -- Num $bushels ) 1 ;
+
+: SUMER_SOW_ACRES_PER_PERSON ( -- Num $acres ) 13 ;
 
 : SUMER_PERSON_RATION ( -- Num $ration ) 20 ;
+
+: SUMER_PEOPLE_STARVED_?IMPEACHED ( Num $population Num $starved -- Bool $impeached )
+  VAR $starved
+  100 / 25 * VAR $starvedImpeachmentThreshold
+  $starved $starvedImpeachmentThreshold >=
+;
 
 : EMPIRE_START ( -- Empire $empire )
   CLASS_EMPIRE_NEW
@@ -190,8 +319,19 @@
   # age $oldAge 1 + MAP_SET
 ;
 
+: CLASS_EMPIRE_?ALIVE ( Empire $empire -- Empire $empire Bool $alive )
+  # population MAP_GET 0 > NOT IF false RETURN THEN
+  # land MAP_GET 0 > NOT IF false RETURN THEN
+  true
+;
+
 : CLASS_EMPIRE_POPULATION_GET ( Empire $empire -- Empire $empire Num $population )
   # population MAP_GET
+;
+
+: CLASS_EMPIRE_POPULATION_HAS ( Empire $empire Num $amount -- Empire $empire Bool $hasEnough )
+  VAR $amount
+  # population MAP_GET $amount >=
 ;
 
 : CLASS_EMPIRE_POPULATION_ADD ( Empire $empire Num $population -- Empire $empire )
@@ -258,6 +398,32 @@
 : ?EVEN ( Num $num -- Bool $isEven ) 2 % 0 == ;
 
 : ?ODD ( Num $num -- Bool $isOdd ) 2 % 0 <> ;
+
+: ?ASK_YES_NO ( String $prompt -- Bool $answer )
+  .. s"_ .. READ_LINE VAR $answer
+  $answer s" yes " == IF
+    true RETURN
+  THEN
+  $answer s" y " == IF
+    true RETURN
+  THEN
+  $answer s" true " == IF
+    true RETURN
+  THEN
+  $answer s" t " == IF
+    true RETURN
+  THEN
+  $answer s" 1 " == IF
+    true RETURN
+  THEN
+  false
+;
+
+: WAIT_ANY_LINE ( -- )
+  s" Enter any line to continue... " .. READ_LINE DROP
+;
+
+: READ_LINE ( -- String $string ) BIN_STDIN_READ_LINE ;
 
 : ?ASK_NUMBER ( -- ?Num $number Bool $success ) BIN_USER_INPUT_ASK_FOR_NUMBER ;
 
