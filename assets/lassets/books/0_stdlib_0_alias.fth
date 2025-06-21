@@ -1,14 +1,4 @@
-: FF_MAIN ( -- )
-  |<
-  400 20 + VAR $time
-  s" Hello, it's " .. s"_ .. $time .. s"_ ..  s" o'clock. " .
-  s" Have a good time! " .
-  s" Bye. " .
-;
-
-: ?EVEN ( Num $num -- Bool $isEven ) 2 % 0 == ;
-
-: ?ODD ( Num $num -- Bool $isOdd ) 2 % 0 <> ;
+: READ_LINE ( -- String $string ) BIN_STDIN_READ_LINE ;
 
 : ?ASK_NUMBER ( -- ?Num $number Bool $success ) BIN_USER_INPUT_ASK_FOR_NUMBER ;
 
